@@ -39,6 +39,8 @@ model Business {
   forecasts           Forecast[]
   goals               BusinessGoal[]
   conversations       AIConversation[]
+  customers           Customer[]
+  khaataEntries       KhaataEntry[]
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 }
@@ -158,4 +160,33 @@ model AIMessage {
   content        String
   toolsUsed      String?
   createdAt      DateTime       @default(now())
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  businessId   String
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String?
+  address      String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  entries      KhaataEntry[]
+}
+
+model KhaataEntry {
+  id           String    @id @default(uuid())
+  businessId   String
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName String
+  phone        String?
+  amount       Float
+  type         String    @default("GAVE") // GAVE (credit given) or RECEIVED (payment collected)
+  description  String
+  dueDate      DateTime?
+  status       String    @default("PENDING") // PENDING or SETTLED
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

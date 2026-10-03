@@ -34,12 +34,12 @@ export async function POST(req: Request) {
     }
 
     const transactions = business.transactions;
-    const totalRev = transactions.filter((t) => t.type === 'CREDIT').reduce((s, t) => s + t.amount, 0) || 482000;
-    const totalExp = transactions.filter((t) => t.type === 'DEBIT').reduce((s, t) => s + t.amount, 0) || 321500;
-    const personalExp = transactions.filter((t) => t.type === 'DEBIT' && !t.isBusiness).reduce((s, t) => s + t.amount, 0) || 14850;
+    const totalRev = transactions.filter((t) => t.type === 'CREDIT').reduce((s, t) => s + t.amount, 0);
+    const totalExp = transactions.filter((t) => t.type === 'DEBIT').reduce((s, t) => s + t.amount, 0);
+    const personalExp = transactions.filter((t) => t.type === 'DEBIT' && !t.isBusiness).reduce((s, t) => s + t.amount, 0);
 
-    const latestMetric = business.metrics[0] || { endingBalance: 142500 };
-    const currentBalance = latestMetric.endingBalance || 142500;
+    const latestMetric = business.metrics[0];
+    const currentBalance = latestMetric?.endingBalance ?? Math.max(100000 + (totalRev - totalExp), 0);
 
     const params: SimulationParams = {
       revenueChangePct: Number(revenueChangePct),

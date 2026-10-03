@@ -50,10 +50,10 @@ export default function CreditReadinessPage() {
   }, []);
 
   const metric = businessData?.metrics?.[0] || {
-    totalRevenue: 482000,
-    totalExpenses: 321500,
-    endingBalance: 142500,
-    cashRunwayDays: 28,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    endingBalance: 0,
+    cashRunwayDays: 0,
   };
 
   const assessment: LoanAssessment = calculateLoanAssessment(

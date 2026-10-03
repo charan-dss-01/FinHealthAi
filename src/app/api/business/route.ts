@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db';
 import { calculateFinancialHealthScore } from '@/lib/analytics/health';
 import { generateFinancialSignals } from '@/lib/analytics/signals';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const business = await prisma.business.findFirst({
@@ -13,8 +15,7 @@ export async function GET() {
           take: 1,
         },
         transactions: {
-          orderBy: { createdAt: 'desc' },
-          take: 50,
+          orderBy: { transactionDate: 'desc' },
         },
       },
     });
@@ -23,37 +24,83 @@ export async function GET() {
       return NextResponse.json({ error: 'No business profile found' }, { status: 404 });
     }
 
-    // Dynamic signal calculation
     const allTx = business.transactions;
-    const totalRev = allTx.filter((t) => t.type === 'CREDIT').reduce((s, t) => s + t.amount, 0);
-    const totalExp = allTx.filter((t) => t.type === 'DEBIT').reduce((s, t) => s + t.amount, 0);
-    const personalExp = allTx.filter((t) => t.type === 'DEBIT' && !t.isBusiness).reduce((s, t) => s + t.amount, 0);
+    const hasTransactions = allTx.length > 0;
 
-    const latestMetric = business.metrics[0] || { endingBalance: 142500, cashRunwayDays: 28 };
+    const totalRev = allTx
+      .filter((t) => t.type === 'CREDIT')
+      .reduce((s, t) => s + t.amount, 0);
+
+    const totalExp = allTx
+      .filter((t) => t.type === 'DEBIT')
+      .reduce((s, t) => s + t.amount, 0);
+
+    const personalExp = allTx
+      .filter((t) => t.type === 'DEBIT' && !t.isBusiness)
+      .reduce((s, t) => s + t.amount, 0);
+
+    const bankAccount = business.bankAccounts[0];
+    const initialBase = bankAccount?.balance ?? (hasTransactions ? 100000 + (totalRev - totalExp) : 0);
+    const endingBalance = Math.max(initialBase, 0);
+
     const healthBreakdown = calculateFinancialHealthScore(
-      totalRev || 482000,
-      totalExp || 321500,
-      latestMetric.endingBalance || 142500,
-      personalExp || 14850
+      totalRev,
+      totalExp,
+      endingBalance,
+      personalExp
     );
 
-    const dynamicSignals = generateFinancialSignals(
-      allTx,
-      healthBreakdown.runwayDays,
-      latestMetric.endingBalance || 142500
-    );
+    const dynamicSignals = hasTransactions
+      ? generateFinancialSignals(allTx, healthBreakdown.runwayDays, endingBalance)
+      : [];
+
+    // Group transactions into real weekly buckets for charts
+    const weeklyData: Record<string, { sales: number; spending: number }> = {
+      'Week 1': { sales: 0, spending: 0 },
+      'Week 2': { sales: 0, spending: 0 },
+      'Week 3': { sales: 0, spending: 0 },
+      'Week 4': { sales: 0, spending: 0 },
+    };
+
+    if (hasTransactions) {
+      const now = new Date();
+      for (const tx of allTx) {
+        const txDate = new Date(tx.transactionDate);
+        const daysDiff = Math.floor((now.getTime() - txDate.getTime()) / (1000 * 60 * 60 * 24));
+        let weekKey = 'Week 4';
+        if (daysDiff > 21) weekKey = 'Week 1';
+        else if (daysDiff > 14) weekKey = 'Week 2';
+        else if (daysDiff > 7) weekKey = 'Week 3';
+
+        if (tx.type === 'CREDIT') {
+          weeklyData[weekKey].sales += tx.amount;
+        } else {
+          weeklyData[weekKey].spending += tx.amount;
+        }
+      }
+    }
+
+    const chartTrendData = Object.entries(weeklyData).map(([month, val]) => ({
+      month,
+      sales: val.sales,
+      spending: val.spending,
+    }));
 
     return NextResponse.json({
       business: {
         ...business,
+        hasTransactions,
+        chartTrendData,
         metrics: [
           {
-            healthScore: healthBreakdown.score,
-            cashRunwayDays: healthBreakdown.runwayDays,
-            totalRevenue: totalRev || 482000,
-            totalExpenses: totalExp || 321500,
-            netCashFlow: (totalRev || 482000) - (totalExp || 321500),
-            endingBalance: latestMetric.endingBalance || 142500,
+            healthScore: hasTransactions ? healthBreakdown.score : 0,
+            cashRunwayDays: hasTransactions ? healthBreakdown.runwayDays : 0,
+            totalRevenue: totalRev,
+            totalExpenses: totalExp,
+            netCashFlow: totalRev - totalExp,
+            endingBalance,
+            personalExpenses: personalExp,
+            hasData: hasTransactions,
             healthBreakdown,
           },
         ],

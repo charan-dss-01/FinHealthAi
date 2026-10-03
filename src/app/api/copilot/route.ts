@@ -9,10 +9,10 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { message, businessId, language = 'en' } = body;
+    const { message, businessId, language = 'en', image } = body;
 
-    if (!message || !message.trim()) {
-      return NextResponse.json({ error: 'Message cannot be empty.' }, { status: 400 });
+    if ((!message || !message.trim()) && !image) {
+      return NextResponse.json({ error: 'Message or image cannot be empty.' }, { status: 400 });
     }
 
     let business = businessId
@@ -20,14 +20,14 @@ export async function POST(req: Request) {
           where: { id: businessId },
           include: {
             metrics: { orderBy: { periodDate: 'desc' }, take: 1 },
-            transactions: { orderBy: { transactionDate: 'desc' }, take: 30 },
+            transactions: { orderBy: { transactionDate: 'desc' }, take: 50 },
           },
         })
       : await prisma.business.findFirst({
           orderBy: { createdAt: 'desc' },
           include: {
             metrics: { orderBy: { periodDate: 'desc' }, take: 1 },
-            transactions: { orderBy: { transactionDate: 'desc' }, take: 30 },
+            transactions: { orderBy: { transactionDate: 'desc' }, take: 50 },
           },
         });
 
@@ -36,13 +36,14 @@ export async function POST(req: Request) {
     }
 
     const transactions = business.transactions;
-    const totalRev = transactions.filter((t) => t.type === 'CREDIT').reduce((s, t) => s + t.amount, 0) || 482000;
-    const totalExp = transactions.filter((t) => t.type === 'DEBIT').reduce((s, t) => s + t.amount, 0) || 321500;
-    const personalExp = transactions.filter((t) => t.type === 'DEBIT' && !t.isBusiness).reduce((s, t) => s + t.amount, 0) || 14850;
+    const totalRev = transactions.filter((t) => t.type === 'CREDIT').reduce((s, t) => s + t.amount, 0);
+    const totalExp = transactions.filter((t) => t.type === 'DEBIT').reduce((s, t) => s + t.amount, 0);
+    const personalExp = transactions.filter((t) => t.type === 'DEBIT' && !t.isBusiness).reduce((s, t) => s + t.amount, 0);
 
-    const latestMetric = business.metrics[0] || { endingBalance: 142500, cashRunwayDays: 28 };
-    const health = calculateFinancialHealthScore(totalRev, totalExp, latestMetric.endingBalance || 142500, personalExp);
-    const signals = generateFinancialSignals(transactions, health.runwayDays, latestMetric.endingBalance || 142500);
+    const latestMetric = business.metrics[0] || { endingBalance: 100000 + (totalRev - totalExp), cashRunwayDays: 30 };
+    const currentBalance = latestMetric.endingBalance || Math.max(100000 + (totalRev - totalExp), 0);
+    const health = calculateFinancialHealthScore(totalRev, totalExp, currentBalance, personalExp);
+    const signals = generateFinancialSignals(transactions, health.runwayDays, currentBalance);
 
     const ctx: BusinessContext = {
       name: business.name,
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
       totalRevenue: totalRev,
       totalExpenses: totalExp,
       netCashFlow: totalRev - totalExp,
-      endingBalance: latestMetric.endingBalance || 142500,
+      endingBalance: currentBalance,
       personalExpenses: personalExp,
       activeSignals: signals.map((s) => ({ title: s.title, severity: s.severity, description: s.description })),
       recentTransactions: transactions.map((t) => ({
@@ -65,10 +66,13 @@ export async function POST(req: Request) {
         isBusiness: t.isBusiness,
       })),
       preferredLanguage: language,
+      image: image ? { mimeType: image.mimeType, data: image.base64 || image.data } : undefined,
     };
 
+    const effectiveQuery = message || 'Please analyze this uploaded receipt/invoice document in detail and tell me how it affects my shop.';
+
     // Generate AI CFO response in selected language using Gemma 4
-    const result = await getCFOAdvisorResponse(message, ctx);
+    const result = await getCFOAdvisorResponse(effectiveQuery, ctx);
 
     // Save conversation history to SQLite DB
     try {
@@ -87,7 +91,7 @@ export async function POST(req: Request) {
 
       await prisma.aIMessage.createMany({
         data: [
-          { conversationId: conversation.id, role: 'user', content: message },
+          { conversationId: conversation.id, role: 'user', content: effectiveQuery },
           { conversationId: conversation.id, role: 'assistant', content: result.reply },
         ],
       });
@@ -100,6 +104,7 @@ export async function POST(req: Request) {
       reply: result.reply,
       modelUsed: result.modelUsed,
       isGemma: result.isGemma,
+      extractedReceipt: result.extractedReceipt,
       contextSnapshot: {
         healthScore: health.score,
         runwayDays: health.runwayDays,

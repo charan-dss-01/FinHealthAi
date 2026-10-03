@@ -13,12 +13,24 @@ export interface BusinessContext {
   activeSignals: Array<{ title: string; severity: string; description: string }>;
   recentTransactions: Array<{ merchant: string; amount: number; type: string; category: string; isBusiness: boolean }>;
   preferredLanguage?: string;
+  image?: {
+    mimeType: string;
+    data: string; // base64
+  };
 }
 
 export interface CFOAdvisorResult {
   reply: string;
   modelUsed: string;
   isGemma: boolean;
+  extractedReceipt?: {
+    merchant: string;
+    amount: number;
+    category: string;
+    isBusiness: boolean;
+    date?: string;
+    description?: string;
+  };
 }
 
 export const DEFAULT_GEMMA_MODEL = process.env.GEMMA_MODEL || 'gemma-4-31b-it';
@@ -146,7 +158,34 @@ export async function getCFOAdvisorResponse(
   ]));
 
   if (apiKey && apiKey.length > 10) {
-    const prompt = `${buildGroundedSystemPrompt(ctx, userQuery)}\n\nUSER QUESTION: "${userQuery}"\n\nDIRECT ASSISTANT RESPONSE:`;
+    const imageInstruction = ctx.image
+      ? `\n\nMULTIMODAL FINANCIAL DOCUMENT ANALYSIS:
+The user has attached an image of a financial bill, invoice, receipt, or bank screenshot.
+Analyze the image in detail. Extract the following details into a JSON block at the very bottom of your response:
+\`\`\`json
+{
+  "merchant": "Extracted Merchant or Vendor Name",
+  "amount": 1234.50,
+  "category": "Inventory & Supplies" | "Utilities" | "Rent" | "Personal Expense (Co-mingled)" | "Other Expense",
+  "isBusiness": true or false,
+  "date": "YYYY-MM-DD"
+}
+\`\`\`
+In your main response text, provide 3 clear, practical business advice steps explaining how this bill/payment impacts the store's current cash runway (${ctx.cashRunwayDays} days) and monthly profit margin.`
+      : '';
+
+    const prompt = `${buildGroundedSystemPrompt(ctx, userQuery)}${imageInstruction}\n\nUSER QUESTION: "${userQuery}"\n\nDIRECT ASSISTANT RESPONSE:`;
+
+    const parts: any[] = [];
+    if (ctx.image && ctx.image.data) {
+      parts.push({
+        inline_data: {
+          mime_type: ctx.image.mimeType || 'image/jpeg',
+          data: ctx.image.data,
+        },
+      });
+    }
+    parts.push({ text: prompt });
 
     for (const model of candidateGemmaModels) {
       try {
@@ -156,7 +195,7 @@ export async function getCFOAdvisorResponse(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
+              contents: [{ parts }],
               generationConfig: {
                 temperature: 0.2,
                 topP: 0.8,
@@ -169,7 +208,26 @@ export async function getCFOAdvisorResponse(
           const data = await response.json();
           const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (aiText) {
-            const cleanedReply = cleanModelResponse(aiText);
+            let extractedReceipt: CFOAdvisorResult['extractedReceipt'] = undefined;
+            const jsonMatch = aiText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
+            if (jsonMatch) {
+              try {
+                const parsed = JSON.parse(jsonMatch[1]);
+                if (parsed.merchant && parsed.amount) {
+                  extractedReceipt = {
+                    merchant: String(parsed.merchant),
+                    amount: Number(parsed.amount),
+                    category: String(parsed.category || 'General Store Expense'),
+                    isBusiness: parsed.isBusiness !== false,
+                    date: parsed.date || new Date().toISOString().split('T')[0],
+                  };
+                }
+              } catch (e) {
+                console.warn('Could not parse JSON receipt block:', e);
+              }
+            }
+
+            const cleanedReply = cleanModelResponse(aiText.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/gi, '').trim());
             const isGemma = model.toLowerCase().includes('gemma');
             const friendlyName = isGemma
               ? model === 'gemma-4-31b-it'
@@ -184,6 +242,7 @@ export async function getCFOAdvisorResponse(
               reply: cleanedReply || aiText,
               modelUsed: friendlyName,
               isGemma: true,
+              extractedReceipt,
             };
           }
         }

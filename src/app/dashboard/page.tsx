@@ -203,12 +203,14 @@ export default function DashboardPage() {
     return { label: 'Good', isPositive: true, text: '' };
   };
 
-  const salesTrendData = [
-    { month: 'Week 1', sales: Math.round(metric.totalRevenue * 0.22), spending: Math.round(metric.totalExpenses * 0.24) },
-    { month: 'Week 2', sales: Math.round(metric.totalRevenue * 0.26), spending: Math.round(metric.totalExpenses * 0.25) },
-    { month: 'Week 3', sales: Math.round(metric.totalRevenue * 0.24), spending: Math.round(metric.totalExpenses * 0.25) },
-    { month: 'Week 4', sales: Math.round(metric.totalRevenue * 0.28), spending: Math.round(metric.totalExpenses * 0.26) },
-  ];
+  const salesTrendData = (data as any)?.chartTrendData?.length > 0
+    ? (data as any).chartTrendData
+    : [
+        { month: 'Week 1', sales: 0, spending: 0 },
+        { month: 'Week 2', sales: 0, spending: 0 },
+        { month: 'Week 3', sales: 0, spending: 0 },
+        { month: 'Week 4', sales: 0, spending: 0 },
+      ];
 
   const healthSteps = [
     { title: 'Understand Spending & Income', description: 'We read your recent customer sales and store payments.' },

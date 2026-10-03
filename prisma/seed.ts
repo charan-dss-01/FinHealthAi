@@ -8,6 +8,8 @@ async function main() {
   // Clean existing tables
   await prisma.aIMessage.deleteMany();
   await prisma.aIConversation.deleteMany();
+  await prisma.khaataEntry.deleteMany();
+  await prisma.customer.deleteMany();
   await prisma.financialSignal.deleteMany();
   await prisma.businessMetric.deleteMany();
   await prisma.transaction.deleteMany();
@@ -236,6 +238,92 @@ async function main() {
       cashRunwayDays: 28,
       healthScore: 78,
     },
+  });
+
+  // Seed Real Khaata Ledger Entries
+  const customer1 = await prisma.customer.create({
+    data: {
+      businessId: business.id,
+      name: 'Suresh Gowda',
+      phone: '9845012345',
+      address: 'Shop #12, Jayanagar',
+    },
+  });
+
+  const customer2 = await prisma.customer.create({
+    data: {
+      businessId: business.id,
+      name: 'Lakshmi Narayana',
+      phone: '9845098765',
+      address: '4th Main Road, Jayanagar',
+    },
+  });
+
+  const customer3 = await prisma.customer.create({
+    data: {
+      businessId: business.id,
+      name: 'Ramesh Reddy',
+      phone: '9448055443',
+      address: 'Near Water Tank',
+    },
+  });
+
+  const customer4 = await prisma.customer.create({
+    data: {
+      businessId: business.id,
+      name: 'Manjunath Swamy',
+      phone: '9880011223',
+      address: 'Cross 7, Jayanagar',
+    },
+  });
+
+  await prisma.khaataEntry.createMany({
+    data: [
+      {
+        businessId: business.id,
+        customerId: customer1.id,
+        customerName: customer1.name,
+        phone: customer1.phone,
+        amount: 3200,
+        type: 'GAVE',
+        description: 'Monthly grocery provisions & oil tin',
+        dueDate: new Date(now.getTime() + 5 * 86400000),
+        status: 'PENDING',
+      },
+      {
+        businessId: business.id,
+        customerId: customer2.id,
+        customerName: customer2.name,
+        phone: customer2.phone,
+        amount: 1850,
+        type: 'GAVE',
+        description: 'Rice bag 25kg & masala packets',
+        dueDate: new Date(now.getTime() + 7 * 86400000),
+        status: 'PENDING',
+      },
+      {
+        businessId: business.id,
+        customerId: customer3.id,
+        customerName: customer3.name,
+        phone: customer3.phone,
+        amount: 4500,
+        type: 'GAVE',
+        description: 'Festival dry fruits & dairy stock',
+        dueDate: new Date(now.getTime() - 2 * 86400000),
+        status: 'PENDING',
+      },
+      {
+        businessId: business.id,
+        customerId: customer4.id,
+        customerName: customer4.name,
+        phone: customer4.phone,
+        amount: 2100,
+        type: 'GAVE',
+        description: 'Ghee, sugar, tea packets',
+        dueDate: new Date(now.getTime() - 10 * 86400000),
+        status: 'SETTLED',
+      },
+    ],
   });
 
   console.log('Seeding complete! Ravi General Store data loaded successfully.');

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Navigation from '@/components/Navigation';
 import HowItWorksModal from '@/components/HowItWorksModal';
 import Tooltip from '@/components/Tooltip';
@@ -20,67 +20,43 @@ import {
   User,
   ArrowRight,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 
 interface KhaataEntry {
   id: string;
   customerName: string;
-  phone: string;
+  phone: string | null;
   amount: number;
   description: string;
-  date: string;
-  dueDate: string;
+  dueDate: string | null;
   status: 'PENDING' | 'SETTLED';
+  createdAt?: string;
+}
+
+interface KhaataSummary {
+  totalReceivables: number;
+  pendingCount: number;
+  settledCount: number;
+  overdueCount: number;
+  overdueAmount: number;
 }
 
 export default function KhaataPage() {
-  const [entries, setEntries] = useState<KhaataEntry[]>([
-    {
-      id: '1',
-      customerName: 'Suresh Gowda',
-      phone: '9845012345',
-      amount: 3200,
-      description: 'Monthly grocery provisions & oil tin',
-      date: '2026-08-20',
-      dueDate: '2026-09-05',
-      status: 'PENDING',
-    },
-    {
-      id: '2',
-      customerName: 'Lakshmi Narayana',
-      phone: '9845098765',
-      amount: 1850,
-      description: 'Rice bag 25kg & masala packets',
-      date: '2026-08-24',
-      dueDate: '2026-09-07',
-      status: 'PENDING',
-    },
-    {
-      id: '3',
-      customerName: 'Ramesh Reddy',
-      phone: '9448055443',
-      amount: 4500,
-      description: 'Festival dry fruits & dairy stock',
-      date: '2026-08-15',
-      dueDate: '2026-08-30',
-      status: 'PENDING',
-    },
-    {
-      id: '4',
-      customerName: 'Manjunath Swamy',
-      phone: '9880011223',
-      amount: 2100,
-      description: 'Ghee, sugar, tea packets',
-      date: '2026-08-10',
-      dueDate: '2026-08-25',
-      status: 'SETTLED',
-    },
-  ]);
-
+  const [entries, setEntries] = useState<KhaataEntry[]>([]);
+  const [summary, setSummary] = useState<KhaataSummary>({
+    totalReceivables: 0,
+    pendingCount: 0,
+    settledCount: 0,
+    overdueCount: 0,
+    overdueAmount: 0,
+  });
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'PENDING' | 'SETTLED'>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // New entry form state
   const [newCustomer, setNewCustomer] = useState({
@@ -91,47 +67,93 @@ export default function KhaataPage() {
     dueDate: '',
   });
 
-  const handleAddEntry = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCustomer.customerName || !newCustomer.amount) return;
-
-    const entry: KhaataEntry = {
-      id: Date.now().toString(),
-      customerName: newCustomer.customerName,
-      phone: newCustomer.phone || '98XXXXXXXX',
-      amount: Number(newCustomer.amount),
-      description: newCustomer.description || 'General items credit',
-      date: new Date().toISOString().split('T')[0],
-      dueDate: newCustomer.dueDate || new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
-      status: 'PENDING',
-    };
-
-    setEntries([entry, ...entries]);
-    setNewCustomer({ customerName: '', phone: '', amount: '', description: '', dueDate: '' });
-    setShowAddModal(false);
+  const loadKhaataData = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/khaata');
+      const data = await res.json();
+      if (data.success) {
+        setEntries(data.entries || []);
+        if (data.summary) setSummary(data.summary);
+      }
+    } catch (err) {
+      console.error('Error fetching Khaata:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleToggleStatus = (id: string) => {
-    setEntries(
-      entries.map((e) =>
-        e.id === id ? { ...e, status: e.status === 'PENDING' ? 'SETTLED' : 'PENDING' } : e
-      )
-    );
+  useEffect(() => {
+    loadKhaataData();
+  }, []);
+
+  const handleAddEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustomer.customerName || !newCustomer.amount || submitting) return;
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/khaata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCustomer),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewCustomer({ customerName: '', phone: '', amount: '', description: '', dueDate: '' });
+        setShowAddModal(false);
+        await loadKhaataData();
+      } else {
+        alert(data.error || 'Failed to add Khaata entry');
+      }
+    } catch (err) {
+      console.error('Error adding Khaata entry:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleToggleStatus = async (id: string, currentStatus: string) => {
+    const nextStatus = currentStatus === 'PENDING' ? 'SETTLED' : 'PENDING';
+    try {
+      const res = await fetch('/api/khaata', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status: nextStatus }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadKhaataData();
+      }
+    } catch (err) {
+      console.error('Error updating status:', err);
+    }
+  };
+
+  const handleDeleteEntry = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this credit entry?')) return;
+    try {
+      const res = await fetch(`/api/khaata?id=${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadKhaataData();
+      }
+    } catch (err) {
+      console.error('Error deleting entry:', err);
+    }
   };
 
   const filteredEntries = entries.filter((e) => {
     const matchesSearch =
       e.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.phone.includes(searchQuery) ||
-      e.description.toLowerCase().includes(searchQuery.toLowerCase());
+      (e.phone || '').includes(searchQuery) ||
+      (e.description || '').toLowerCase().includes(searchQuery.toLowerCase());
     if (filterStatus === 'PENDING') return matchesSearch && e.status === 'PENDING';
     if (filterStatus === 'SETTLED') return matchesSearch && e.status === 'SETTLED';
     return matchesSearch;
   });
-
-  const totalPendingReceivables = entries
-    .filter((e) => e.status === 'PENDING')
-    .reduce((sum, e) => sum + e.amount, 0);
 
   const khaataSteps = [
     { title: 'Log Customer Udhar', description: 'Record customer name, phone number, and grocery/goods credit amount.' },
@@ -176,22 +198,22 @@ export default function KhaataPage() {
               Total Pending Receivables
             </span>
             <div className="text-3xl font-black text-amber-600">
-              ₹{totalPendingReceivables.toLocaleString('en-IN')}
+              ₹{summary.totalReceivables.toLocaleString('en-IN')}
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Expected incoming cash from {entries.filter((e) => e.status === 'PENDING').length} customers
+              Expected incoming cash from {summary.pendingCount} customers
             </p>
           </div>
 
           <div className="bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1">
-              Settled This Month
+              Settled Accounts
             </span>
             <div className="text-3xl font-black text-emerald-700">
-              ₹{entries.filter((e) => e.status === 'SETTLED').reduce((s, e) => s + e.amount, 0).toLocaleString('en-IN')}
+              {summary.settledCount} Settled
             </div>
             <p className="text-xs text-emerald-600 font-semibold mt-1 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> 100% recovered on time
+              <CheckCircle2 className="w-3.5 h-3.5" /> Recovered on time
             </p>
           </div>
 
@@ -200,7 +222,11 @@ export default function KhaataPage() {
               AI Runway Impact
             </span>
             <div className="text-sm font-semibold text-slate-800">
-              Recovering pending balances adds <span className="font-extrabold text-indigo-700">+4 Days</span> to your cash runway buffer.
+              Recovering pending balances adds{' '}
+              <span className="font-extrabold text-indigo-700">
+                +{Math.max(1, Math.round(summary.totalReceivables / 8000))} Days
+              </span>{' '}
+              to your cash runway buffer.
             </div>
           </div>
         </div>
@@ -233,7 +259,7 @@ export default function KhaataPage() {
                 filterStatus === 'PENDING' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Pending ({entries.filter((e) => e.status === 'PENDING').length})
+              Pending ({summary.pendingCount})
             </button>
             <button
               onClick={() => setFilterStatus('SETTLED')}
@@ -241,73 +267,112 @@ export default function KhaataPage() {
                 filterStatus === 'SETTLED' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              Settled ({entries.filter((e) => e.status === 'SETTLED').length})
+              Settled ({summary.settledCount})
             </button>
           </div>
         </div>
 
         {/* Khaata Entries Table */}
         <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-xs">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
-                <tr>
-                  <th className="py-3.5 px-4 font-semibold">Customer</th>
-                  <th className="py-3.5 px-4 font-semibold">Particulars / Items</th>
-                  <th className="py-3.5 px-4 font-semibold">Credit Date</th>
-                  <th className="py-3.5 px-4 font-semibold">Due Date</th>
-                  <th className="py-3.5 px-4 font-semibold">Status</th>
-                  <th className="py-3.5 px-4 text-right font-semibold">Amount</th>
-                  <th className="py-3.5 px-4 text-center font-semibold">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {filteredEntries.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="py-3.5 px-4">
-                      <div className="font-bold text-slate-900 text-xs">{entry.customerName}</div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                        <Phone className="w-3 h-3 text-slate-400" /> {entry.phone}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600">{entry.description}</td>
-                    <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px]">{entry.date}</td>
-                    <td className="py-3.5 px-4 font-mono text-[11px]">
-                      <span className={entry.status === 'PENDING' ? 'text-amber-800 font-bold' : 'text-slate-400'}>
-                        {entry.dueDate}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {entry.status === 'PENDING' ? (
-                        <Badge variant="warning" size="sm" icon="warning">
-                          Pending Payment
-                        </Badge>
-                      ) : (
-                        <Badge variant="success" size="sm" icon="check">
-                          Settled
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-bold text-xs text-slate-900">
-                      ₹{entry.amount.toLocaleString('en-IN')}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={() => handleToggleStatus(entry.id)}
-                        className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all ${
-                          entry.status === 'PENDING'
-                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
-                            : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                        }`}
-                      >
-                        {entry.status === 'PENDING' ? 'Mark Paid ✓' : 'Mark Pending'}
-                      </button>
-                    </td>
+          {loading ? (
+            <div className="p-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center space-y-2">
+              <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              <span>Loading ledger records from database...</span>
+            </div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 text-xs">
+              No ledger entries match your search criteria.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-3.5 px-4 font-semibold">Customer</th>
+                    <th className="py-3.5 px-4 font-semibold">Particulars / Items</th>
+                    <th className="py-3.5 px-4 font-semibold">Credit Date</th>
+                    <th className="py-3.5 px-4 font-semibold">Due Date</th>
+                    <th className="py-3.5 px-4 font-semibold">Status</th>
+                    <th className="py-3.5 px-4 text-right font-semibold">Amount</th>
+                    <th className="py-3.5 px-4 text-center font-semibold">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {filteredEntries.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-3.5 px-4">
+                        <div className="font-bold text-slate-900 text-xs">{entry.customerName}</div>
+                        {entry.phone && (
+                          <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-slate-400" /> {entry.phone}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600">{entry.description}</td>
+                      <td className="py-3.5 px-4 text-slate-400 font-mono text-[11px]">
+                        {entry.createdAt
+                          ? new Date(entry.createdAt).toLocaleDateString('en-IN')
+                          : 'Recent'}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-[11px]">
+                        <span className={entry.status === 'PENDING' ? 'text-amber-800 font-bold' : 'text-slate-400'}>
+                          {entry.dueDate ? new Date(entry.dueDate).toLocaleDateString('en-IN') : 'No due date'}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {entry.status === 'PENDING' ? (
+                          <Badge variant="warning" size="sm" icon="warning">
+                            Pending Payment
+                          </Badge>
+                        ) : (
+                          <Badge variant="success" size="sm" icon="check">
+                            Settled
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-bold text-xs text-slate-900">
+                        ₹{entry.amount.toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleToggleStatus(entry.id, entry.status)}
+                            className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all ${
+                              entry.status === 'PENDING'
+                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {entry.status === 'PENDING' ? 'Mark Paid ✓' : 'Mark Pending'}
+                          </button>
+                          {entry.phone && entry.status === 'PENDING' && (
+                            <a
+                              href={`https://wa.me/91${entry.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                                `Namaste ${entry.customerName}, gentle reminder regarding your pending balance of ₹${entry.amount.toLocaleString('en-IN')} for ${entry.description}. Thank you!`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200"
+                              title="Send WhatsApp Payment Reminder"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => handleDeleteEntry(entry.id)}
+                            className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                            title="Delete entry"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Add Entry Modal */}
@@ -394,8 +459,8 @@ export default function KhaataPage() {
                   >
                     Cancel
                   </button>
-                  <Button variant="primary" size="sm" type="submit">
-                    Save Credit Entry
+                  <Button variant="primary" size="sm" type="submit" disabled={submitting}>
+                    {submitting ? 'Saving...' : 'Save Credit Entry'}
                   </Button>
                 </div>
               </form>

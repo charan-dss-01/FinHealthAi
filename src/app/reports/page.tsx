@@ -39,12 +39,12 @@ export default function ReportsPage() {
   }, []);
 
   const metric = data?.metrics?.[0] || {
-    healthScore: 78,
-    cashRunwayDays: 28,
-    totalRevenue: 482000,
-    totalExpenses: 321500,
-    netCashFlow: 160500,
-    endingBalance: 142500,
+    healthScore: 0,
+    cashRunwayDays: 0,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    netCashFlow: 0,
+    endingBalance: 0,
   };
 
   const handlePrint = () => {
