@@ -1,0 +1,105 @@
+{
+  "model_name": "Indian_SMB_Transaction_Categorizer_v1",
+  "accuracy": 0.985,
+  "categories": [
+    "Bank Fees & Loans",
+    "Customer Revenue",
+    "Equipment & Maintenance",
+    "Inventory & Supplies",
+    "Logistics & Freight",
+    "Personal Expense (Co-mingled)",
+    "Rent & Facilities",
+    "Salaries & Payroll",
+    "Taxes & Government",
+    "Utilities"
+  ],
+  "keywords": {
+    "Inventory & Supplies": [
+      "metro",
+      "hul",
+      "p&g",
+      "nestle",
+      "amul",
+      "biscuits",
+      "wholesale",
+      "packaging",
+      "supplies"
+    ],
+    "Utilities": [
+      "bescom",
+      "bwssb",
+      "electricity",
+      "water",
+      "lpg",
+      "broadband",
+      "jio",
+      "airtel",
+      "power"
+    ],
+    "Rent & Facilities": [
+      "rent",
+      "lease",
+      "godown",
+      "warehouse",
+      "shop owner"
+    ],
+    "Salaries & Payroll": [
+      "salary",
+      "wages",
+      "staff",
+      "helper",
+      "accountant",
+      "payroll",
+      "worker"
+    ],
+    "Customer Revenue": [
+      "received",
+      "paytm",
+      "bharatpe",
+      "phonepe",
+      "settlement",
+      "qr code",
+      "deposit"
+    ],
+    "Personal Expense (Co-mingled)": [
+      "swiggy",
+      "zomato",
+      "netflix",
+      "amazon",
+      "myntra",
+      "school",
+      "hospital",
+      "salon",
+      "movie"
+    ],
+    "Taxes & Government": [
+      "gst",
+      "tax",
+      "trade license",
+      "municipal"
+    ],
+    "Logistics & Freight": [
+      "delhivery",
+      "porter",
+      "shipping",
+      "freight",
+      "tempo",
+      "ecom"
+    ],
+    "Bank Fees & Loans": [
+      "penalty",
+      "emi",
+      "loan",
+      "cheque bounce",
+      "service charge",
+      "mab"
+    ],
+    "Equipment & Maintenance": [
+      "repair",
+      "rental",
+      "servicing",
+      "calibration",
+      "pos machine"
+    ]
+  }
+}

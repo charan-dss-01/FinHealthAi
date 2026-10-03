@@ -1,0 +1,7 @@
+{
+  "model_name": "Isolation_Forest_ZScore_Anomaly_Detector_v1",
+  "mean_expense_amount": 3508.21,
+  "std_expense_amount": 1176.33,
+  "z_score_threshold_amount": 7037.18,
+  "anomaly_contamination_rate": 0.02
+}
