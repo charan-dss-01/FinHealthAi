@@ -92,10 +92,11 @@ export function VoiceCFOModal({ isOpen, onClose, businessId }: VoiceCFOModalProp
           setCurrentPartial(partial);
           currentQueryRef.current = partial;
         },
-        onTranscriptFinal: async (finalText) => {
-          if (!finalText.trim()) return;
+        onTranscriptFinal: async (payload: any) => {
+          const text = typeof payload === 'string' ? payload : payload?.text;
+          if (!text || !text.trim()) return;
           setCurrentPartial('');
-          await handleUserVoiceQuery(finalText.trim());
+          await handleUserVoiceQuery(text.trim());
         },
         onInterrupted: () => {
           setState('LISTENING');

@@ -8,7 +8,7 @@ export interface AudioEngineCallbacks {
   onAudioEnergy?: (level: number) => void;
   onListeningStateChange?: (isListening: boolean) => void;
   onTranscriptPartial?: (text: string) => void;
-  onTranscriptFinal?: (data: { text: string; audioBlob: Blob | null }) => void;
+  onTranscriptFinal?: (data: { text: string; audioBlob: Blob | null } | string) => void;
   onInterrupted?: () => void;
   onError?: (err: Error) => void;
 }
@@ -41,6 +41,10 @@ export class VoiceAudioEngine {
   /**
    * Start listening: captures live mic audio via MediaRecorder & AnalyserNode
    */
+  public async startMicrophone(language: string = 'en-IN'): Promise<void> {
+    return this.startListening(language);
+  }
+
   public async startListening(language: string = 'en-IN'): Promise<void> {
     if (this.isSpeaking) {
       this.interrupt();
