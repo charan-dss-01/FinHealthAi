@@ -4,26 +4,32 @@ import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Navigation from '@/components/Navigation';
 import HowItWorksModal from '@/components/HowItWorksModal';
 import Tooltip from '@/components/Tooltip';
-import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { MarkdownContent } from '@/components/ui/MarkdownContent';
 import { useLanguage } from '@/lib/i18n/LanguageContext';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   Sparkles,
   Send,
   Bot,
   User,
   RefreshCw,
-  HelpCircle,
-  ArrowRight,
   Paperclip,
   Image as ImageIcon,
   X,
   PlusCircle,
   CheckCircle2,
-  Receipt
+  Receipt,
+  Copy,
+  Check,
+  StopCircle,
+  RotateCcw,
+  Zap,
+  ShieldCheck,
+  Mic
 } from 'lucide-react';
+import { VoiceCFOModal } from '@/components/voice/VoiceCFOModal';
 
 interface ExtractedReceipt {
   merchant: string;
@@ -42,6 +48,10 @@ interface ChatMessage {
   imagePreview?: string;
   extractedReceipt?: ExtractedReceipt;
   addedAsTransaction?: boolean;
+  provider?: string;
+  modelUsed?: string;
+  latencyMs?: number;
+  cached?: boolean;
 }
 
 function CopilotChatContent() {
@@ -54,16 +64,21 @@ function CopilotChatContent() {
       id: '1',
       sender: 'ASSISTANT',
       content:
-        'Namaste! I am your AI Business Assistant powered by Google Gemma 4. I help you understand your store sales, vendor payments, cash runway, and even analyze uploaded bills & receipts in everyday language. How can I help your store today?',
+        'Namaste! I am your AI Financial Copilot for FinHealth AI. I provide fast, grounded intelligence on your store sales, cash runway, vendor spending, and bill receipts in everyday language.',
       timestamp: 'Just now',
     },
   ]);
 
   const [inputMessage, setInputMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeModel, setActiveModel] = useState('Gemma 4 31B IT');
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [activeModel, setActiveModel] = useState('Gemini 2.5 Flash');
+  const [activeProvider, setActiveProvider] = useState<'gemini' | 'groq'>('gemini');
   const [businessInfo, setBusinessInfo] = useState<any | null>(null);
   const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const autoSentRef = useRef(false);
@@ -76,6 +91,12 @@ function CopilotChatContent() {
   ];
 
   useEffect(() => {
+    if (searchParams.get('voice') === 'true') {
+      setIsVoiceModalOpen(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     fetch('/api/business')
       .then((res) => res.json())
       .then((d) => {
@@ -86,7 +107,22 @@ function CopilotChatContent() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, loading]);
+
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setLoading(false);
+      setStreamingMessageId(null);
+    }
+  };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -137,7 +173,7 @@ function CopilotChatContent() {
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: 'USER',
-      content: query || 'Attached financial document/bill for Gemma 4 analysis.',
+      content: query || 'Attached financial document/bill for AI Copilot analysis.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       imagePreview: currentImg ? `data:${currentImg.mimeType};base64,${currentImg.base64}` : undefined,
     };
@@ -147,50 +183,137 @@ function CopilotChatContent() {
     setAttachedImage(null);
     setLoading(true);
 
-    try {
-      const res = await fetch('/api/copilot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: query,
-          language,
-          image: currentImg ? { base64: currentImg.base64, mimeType: currentImg.mimeType } : undefined,
-        }),
-      });
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
-      const data = await res.json();
-      if (data?.modelUsed) {
-        setActiveModel(data.modelUsed);
-      }
-      if (data?.reply) {
+    // Check if streaming should be used (text questions)
+    const isImage = Boolean(currentImg);
+
+    try {
+      if (!isImage) {
+        // Stream text queries for sub-second first-token UX
+        const assistantMsgId = (Date.now() + 1).toString();
+        setStreamingMessageId(assistantMsgId);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMsgId,
+            sender: 'ASSISTANT',
+            content: '',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+
+        const res = await fetch('/api/copilot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: query,
+            language,
+            stream: true,
+          }),
+          signal: abortController.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          throw new Error('Stream request failed');
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const textChunk = decoder.decode(value, { stream: true });
+          const lines = textChunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.substring(6).trim();
+              if (payload === '[DONE]') break;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed.chunk) {
+                  accumulated += parsed.chunk;
+                  setMessages((prev) =>
+                    prev.map((m) => (m.id === assistantMsgId ? { ...m, content: accumulated } : m))
+                  );
+                }
+              } catch {}
+            }
+          }
+        }
+
+        // If stream ended with no accumulated tokens, retrieve via standard JSON endpoint
+        if (!accumulated.trim()) {
+          const fallbackRes = await fetch('/api/copilot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: query,
+              language,
+              stream: false,
+            }),
+            signal: abortController.signal,
+          });
+          const fbData = await fallbackRes.json();
+          if (fbData?.reply) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantMsgId ? { ...m, content: fbData.reply } : m))
+            );
+          }
+        }
+      } else {
+        // Non-streamed for multimodal document analysis
+        const res = await fetch('/api/copilot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: query,
+            language,
+            image: currentImg ? { base64: currentImg.base64, mimeType: currentImg.mimeType } : undefined,
+          }),
+          signal: abortController.signal,
+        });
+
+        const data = await res.json();
+        if (data?.modelUsed) setActiveModel(data.modelUsed);
+        if (data?.provider) setActiveProvider(data.provider);
+
         const botMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           sender: 'ASSISTANT',
-          content: data.reply,
+          content: data.reply || 'Analysis complete.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           extractedReceipt: data.extractedReceipt,
+          modelUsed: data.modelUsed,
+          provider: data.provider,
+          latencyMs: data.latencyMs,
+          cached: data.cached,
         };
         setMessages((prev) => [...prev, botMsg]);
-      } else if (data?.error) {
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log('Stream generation aborted by user.');
+      } else {
+        console.error('[Copilot] Fetch Error:', err);
         const botMsg: ChatMessage = {
           id: (Date.now() + 1).toString(),
           sender: 'ASSISTANT',
-          content: `⚠️ Note: ${data.error}`,
+          content: 'Unable to reach the assistant server. Please check your connection and try again.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         setMessages((prev) => [...prev, botMsg]);
       }
-    } catch (err) {
-      console.error('[Copilot] Fetch Error:', err);
-      const botMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        sender: 'ASSISTANT',
-        content: 'Unable to reach the assistant server. Please verify your connection and try again.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, botMsg]);
     } finally {
       setLoading(false);
+      setStreamingMessageId(null);
+      abortControllerRef.current = null;
     }
   };
 
@@ -204,9 +327,9 @@ function CopilotChatContent() {
   const metric = businessInfo?.metrics?.[0] || { healthScore: 78, cashRunwayDays: 28, healthState: 'GREEN' };
 
   const assistantSteps = [
-    { title: 'Read Store Database & Bills', description: 'We pull your latest sales, expenses, or scanned bill documents.' },
-    { title: 'Do Grounded Business Math', description: 'Gemma 4 calculates exact profit margins, spending speed, and hiring safety.' },
-    { title: 'Explain in Simple Language', description: 'We give you clear, actionable advice suited for an Indian Kirana/SMB owner.' },
+    { title: 'Read Store Database & Bills', description: 'Grounded financial figures queried deterministically from your store ledger.' },
+    { title: 'Verified Store Ledger', description: 'Financial insights calculated directly from your store cash and billing records.' },
+    { title: 'Explain in Simple Language', description: 'Clear, actionable 3-step advice in English, Telugu, Hindi, and Indian dialects.' },
   ];
 
   return (
@@ -224,23 +347,30 @@ function CopilotChatContent() {
               <Tooltip text="Ask questions about your store cash, hiring decisions, supplier spending, or upload bill photos in everyday language." />
             </h1>
             <p className="text-[11px] text-slate-400 font-medium">
-              {businessInfo?.name || 'Ravi General Store'} • Gemma 4 Grounded Multimodal CFO
+              {businessInfo?.name || 'Ravi General Store'} • Financial Intelligence Assistant
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 text-xs">
-          <div className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl font-bold flex items-center gap-1.5 shadow-xs">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            <span>AI Model: {activeModel}</span>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Link
+            href="/voice"
+            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:from-indigo-700 hover:to-purple-800 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-all transform active:scale-95"
+          >
+            <Mic className="w-3.5 h-3.5 animate-pulse" />
+            <span>Voice CFO</span>
+          </Link>
+          <div className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-bold flex items-center gap-1.5 shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Assistant Online</span>
           </div>
-          <div className="hidden sm:flex px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl items-center gap-2">
-            <span className="text-slate-500 font-medium">{t('dash.health_title', 'Business Health')}:</span>
-            <span className="font-extrabold text-slate-900">{metric.healthScore}/100</span>
+          <div className="hidden sm:flex px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl items-center gap-1.5 shadow-xs">
+            <span className="text-slate-500 font-medium">Cash Runway:</span>
+            <span className="font-extrabold text-slate-900">{metric.cashRunwayDays} Days</span>
           </div>
-          <div className="hidden sm:flex px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl items-center gap-2">
-            <span className="text-amber-800 font-medium">{t('dash.money_duration', 'Money Duration')}:</span>
-            <span className="font-extrabold text-amber-900">~{metric.cashRunwayDays} Days</span>
+          <div className="flex px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl items-center gap-1.5 shadow-xs">
+            <span className="text-slate-500 font-medium">{t('dash.health_title', 'Health')}:</span>
+            <span className="font-extrabold text-emerald-700">{metric.healthScore}/100</span>
           </div>
         </div>
       </div>
@@ -251,7 +381,7 @@ function CopilotChatContent() {
       {/* Suggested Prompts Grid */}
       <div className="space-y-2">
         <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-          Click Any Suggested Question:
+          Quick Financial Questions:
         </span>
         <div className="flex flex-wrap gap-2">
           {suggestedPrompts.map((promptText, i) => (
@@ -294,7 +424,11 @@ function CopilotChatContent() {
                 </div>
               )}
 
-              <div className="whitespace-pre-line">{msg.content}</div>
+              {msg.sender === 'USER' ? (
+                <div className="whitespace-pre-line">{msg.content}</div>
+              ) : (
+                <MarkdownContent content={msg.content} />
+              )}
 
               {/* Extracted Receipt Action Card */}
               {msg.extractedReceipt && (
@@ -336,25 +470,48 @@ function CopilotChatContent() {
                 </div>
               )}
 
-              <div
-                suppressHydrationWarning
-                className={`text-[10px] mt-2 ${msg.sender === 'USER' ? 'text-indigo-200' : 'text-slate-400'} text-right`}
-              >
-                {msg.timestamp}
-              </div>
+              {/* Message Footer: Actions & Model Audit */}
+              {msg.sender === 'ASSISTANT' && msg.content && (
+                <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleCopy(msg.id, msg.content)}
+                      className="hover:text-indigo-600 flex items-center gap-1 transition-colors"
+                      title="Copy response"
+                    >
+                      {copiedId === msg.id ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-600 font-semibold">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <span>{msg.timestamp}</span>
+                </div>
+              )}
             </div>
           </div>
         ))}
 
         {loading && (
-          <div className="flex items-center space-x-3 text-xs text-slate-500">
-            <div className="w-8 h-8 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+          <div className="flex items-center justify-between text-xs text-slate-500 bg-slate-50 p-3 rounded-2xl border border-slate-200 animate-fade-in">
+            <div className="flex items-center space-x-2">
               <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
-              <span>Gemma 4 is analyzing your store numbers and document...</span>
+              <span>Analyzing store numbers...</span>
             </div>
+            <button
+              onClick={handleStopGeneration}
+              className="px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:text-rose-600 bg-white border border-slate-200 rounded-lg flex items-center gap-1 shadow-xs"
+            >
+              <StopCircle className="w-3 h-3" />
+              <span>Stop</span>
+            </button>
           </div>
         )}
 
@@ -394,7 +551,7 @@ function CopilotChatContent() {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           className="p-2.5 hover:bg-slate-100 text-slate-500 hover:text-indigo-600 rounded-xl transition-all"
-          title="Attach Bill, Receipt or Bank Statement Screenshot for Gemma 4 Multimodal Analysis"
+          title="Attach Bill, Receipt or Bank Statement Screenshot for Multimodal Analysis"
         >
           <Paperclip className="w-4 h-4" />
         </button>
@@ -405,7 +562,7 @@ function CopilotChatContent() {
           onChange={(e) => setInputMessage(e.target.value)}
           placeholder={
             attachedImage
-              ? 'Ask Gemma 4 about this attached bill / document...'
+              ? 'Ask AI Copilot about this attached bill / document...'
               : 'Ask your AI Assistant anything about store sales, hiring, or spending...'
           }
           className="flex-1 px-3 py-2.5 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none"
@@ -419,6 +576,12 @@ function CopilotChatContent() {
           <Send className="w-4 h-4" />
         </button>
       </form>
+
+      <VoiceCFOModal
+        isOpen={isVoiceModalOpen}
+        onClose={() => setIsVoiceModalOpen(false)}
+        businessId={businessInfo?.id}
+      />
     </main>
   );
 }

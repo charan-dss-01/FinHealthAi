@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { notificationService, calculateCustomerOutstandingBalance } from '@/lib/notifications/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,6 +87,11 @@ export async function POST(req: Request) {
     const {
       customerName,
       phone,
+      email,
+      whatsappConsent,
+      emailConsent,
+      remindersEnabled,
+      preferredLanguage,
       amount,
       description,
       dueDate,
@@ -122,8 +128,29 @@ export async function POST(req: Request) {
           businessId: business.id,
           name: customerName,
           phone: phone || null,
+          email: email || null,
+          whatsappConsent: Boolean(whatsappConsent),
+          emailConsent: Boolean(emailConsent),
+          remindersEnabled: Boolean(remindersEnabled),
+          preferredLanguage: preferredLanguage || 'en',
         },
       });
+    } else {
+      // Update phone/email or preferences if provided
+      const updateFields: any = {};
+      if (phone && phone !== customer.phone) updateFields.phone = phone;
+      if (email && email !== customer.email) updateFields.email = email;
+      if (whatsappConsent !== undefined) updateFields.whatsappConsent = Boolean(whatsappConsent);
+      if (emailConsent !== undefined) updateFields.emailConsent = Boolean(emailConsent);
+      if (remindersEnabled !== undefined) updateFields.remindersEnabled = Boolean(remindersEnabled);
+      if (preferredLanguage) updateFields.preferredLanguage = preferredLanguage;
+
+      if (Object.keys(updateFields).length > 0) {
+        customer = await prisma.customer.update({
+          where: { id: customer.id },
+          data: updateFields,
+        });
+      }
     }
 
     const entry = await prisma.khaataEntry.create({
@@ -136,11 +163,46 @@ export async function POST(req: Request) {
         type,
         description: description || 'Store credit/purchase',
         dueDate: dueDate ? new Date(dueDate) : null,
-        status: 'PENDING',
+        status: type === 'RECEIVED' ? 'SETTLED' : 'PENDING',
       },
     });
 
-    return NextResponse.json({ success: true, entry });
+    // Automated Notification Trigger:
+    // When a new credit entry is created, trigger notification to customer
+    // Runs cleanly without throwing errors if provider is not configured
+    let notificationResult = null;
+    try {
+      if (type === 'GAVE') {
+        const liveBalance = await calculateCustomerOutstandingBalance(business.id, customer.id);
+        notificationResult = await notificationService.dispatchNotification({
+          businessId: business.id,
+          customerId: customer.id,
+          khaataEntryId: entry.id,
+          type: 'CREDIT_CREATED',
+          amount: Number(amount),
+          overrideOutstandingBalance: liveBalance,
+          dueDate: entry.dueDate,
+          description: entry.description,
+          idempotencyKey: `ENTRY-CREATE-${entry.id}`,
+        });
+      } else if (type === 'RECEIVED') {
+        const liveBalance = await calculateCustomerOutstandingBalance(business.id, customer.id);
+        notificationResult = await notificationService.dispatchNotification({
+          businessId: business.id,
+          customerId: customer.id,
+          khaataEntryId: entry.id,
+          type: 'PAYMENT_RECEIVED',
+          amount: Number(amount),
+          overrideOutstandingBalance: liveBalance,
+          description: entry.description,
+          idempotencyKey: `ENTRY-PAYMENT-${entry.id}`,
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Khaata Notification Trigger Error]:', notifErr);
+    }
+
+    return NextResponse.json({ success: true, entry, notifications: notificationResult });
   } catch (error) {
     console.error('Khaata POST Error:', error);
     return NextResponse.json({ error: 'Failed to create Khaata entry' }, { status: 500 });
@@ -164,9 +226,33 @@ export async function PATCH(req: Request) {
     const updated = await prisma.khaataEntry.update({
       where: { id },
       data: updateData,
+      include: {
+        customer: true,
+        business: true,
+      },
     });
 
-    return NextResponse.json({ success: true, entry: updated });
+    // If marked as SETTLED (payment collected for this credit entry), trigger Payment Confirmation notification
+    let notificationResult = null;
+    if (status === 'SETTLED' && updated.customerId) {
+      try {
+        const liveBalance = await calculateCustomerOutstandingBalance(updated.businessId, updated.customerId);
+        notificationResult = await notificationService.dispatchNotification({
+          businessId: updated.businessId,
+          customerId: updated.customerId,
+          khaataEntryId: updated.id,
+          type: 'PAYMENT_RECEIVED',
+          amount: updated.amount,
+          overrideOutstandingBalance: liveBalance,
+          description: updated.description,
+          idempotencyKey: `ENTRY-SETTLED-${updated.id}`,
+        });
+      } catch (notifErr) {
+        console.error('[Khaata Settle Notification Error]:', notifErr);
+      }
+    }
+
+    return NextResponse.json({ success: true, entry: updated, notifications: notificationResult });
   } catch (error) {
     console.error('Khaata PATCH Error:', error);
     return NextResponse.json({ error: 'Failed to update Khaata entry' }, { status: 500 });

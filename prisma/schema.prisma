@@ -41,6 +41,7 @@ model Business {
   conversations       AIConversation[]
   customers           Customer[]
   khaataEntries       KhaataEntry[]
+  notificationLogs    NotificationLog[]
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 }
@@ -163,30 +164,62 @@ model AIMessage {
 }
 
 model Customer {
-  id           String        @id @default(uuid())
-  businessId   String
-  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name         String
-  phone        String?
-  address      String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  entries      KhaataEntry[]
+  id                  String            @id @default(uuid())
+  businessId          String
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name                String
+  phone               String?
+  email               String?
+  address             String?
+  whatsappConsent     Boolean           @default(false)
+  emailConsent        Boolean           @default(false)
+  remindersEnabled    Boolean           @default(false)
+  preferredLanguage   String            @default("en") // en, hi, te
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  entries             KhaataEntry[]
+  notificationLogs    NotificationLog[]
 }
 
 model KhaataEntry {
-  id           String    @id @default(uuid())
-  businessId   String
-  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customerId   String?
-  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerName String
-  phone        String?
-  amount       Float
-  type         String    @default("GAVE") // GAVE (credit given) or RECEIVED (payment collected)
-  description  String
-  dueDate      DateTime?
-  status       String    @default("PENDING") // PENDING or SETTLED
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                  String            @id @default(uuid())
+  businessId          String
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId          String?
+  customer            Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName        String
+  phone               String?
+  amount              Float
+  type                String            @default("GAVE") // GAVE (credit given) or RECEIVED (payment collected)
+  description         String
+  dueDate             DateTime?
+  status              String            @default("PENDING") // PENDING or SETTLED
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  notificationLogs    NotificationLog[]
+}
+
+model NotificationLog {
+  id             String       @id @default(uuid())
+  businessId     String
+  business       Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId     String?
+  customer       Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  khaataEntryId  String?
+  khaataEntry    KhaataEntry? @relation(fields: [khaataEntryId], references: [id], onDelete: SetNull)
+  type           String       // CREDIT_CREATED, PAYMENT_RECEIVED, REMINDER_DUE_SOON, REMINDER_DUE_TODAY, REMINDER_OVERDUE_1, REMINDER_OVERDUE_2
+  channel        String       // WHATSAPP, EMAIL
+  recipient      String       // Phone number or email address
+  status         String       @default("PENDING") // PENDING, ACCEPTED, SENT, DELIVERED, FAILED, CANCELLED
+  providerId     String?      // Twilio Message SID or Resend Email ID
+  idempotencyKey String?      @unique
+  failureReason  String?
+  metadata       String?      // JSON string of payload details
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([businessId])
+  @@index([customerId])
+  @@index([khaataEntryId])
+  @@index([status])
 }

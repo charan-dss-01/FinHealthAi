@@ -233,10 +233,10 @@ export default function DashboardPage() {
             </div>
             <p className="text-xs sm:text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-2">
               <span>AI Business Operating System</span>
-              <span className="text-slate-300">•</span>
-              <span className="text-slate-500 flex items-center gap-1 font-mono text-[11px]">
+              {/* <span className="text-slate-300">•</span> */}
+              {/* <span className="text-slate-500 flex items-center gap-1 font-mono text-[11px]">
                 <Database className="w-3.5 h-3.5 text-indigo-600" /> Stored in local SQLite
-              </span>
+              </span> */}
             </p>
           </div>
 
@@ -339,7 +339,7 @@ export default function DashboardPage() {
             <MetricCard
               title="Money Available"
               value={`₹${(metric.endingBalance / 100000).toFixed(2)} Lakhs`}
-              subtitle="SBI Current A/c XX4829"
+              subtitle="Available"
               tooltip="The exact cash currently available in your business bank account."
               icon={<Wallet className="w-5 h-5" />}
               variant="indigo"

@@ -4,6 +4,7 @@ import { parseBankStatementCSV } from '@/lib/ingestion/parser';
 import { normalizeTransactionDescription } from '@/lib/ingestion/normalizer';
 import { classifyTransaction } from '@/lib/ml/classifier';
 import { detectComingling } from '@/lib/ingestion/comingling';
+import { calculateFinancialHealthScore } from '@/lib/analytics/health';
 
 export async function POST(req: Request) {
   try {
@@ -98,14 +99,22 @@ export async function POST(req: Request) {
 
     const totalRevenue = allTx.filter((t) => t.type === 'CREDIT').reduce((sum, t) => sum + t.amount, 0);
     const totalExpenses = allTx.filter((t) => t.type === 'DEBIT').reduce((sum, t) => sum + t.amount, 0);
+    const personalExpenses = allTx.filter((t) => t.type === 'DEBIT' && !t.isBusiness).reduce((sum, t) => sum + t.amount, 0);
     const netCashFlow = totalRevenue - totalExpenses;
-    const avgDailyExpense = totalExpenses / 30 || 1000;
     const endingBalance = Math.max(100000 + netCashFlow, 10000);
-    const cashRunwayDays = Math.max(Math.floor(endingBalance / avgDailyExpense), 1);
 
-    let healthScore = 80;
-    if (netCashFlow < 0) healthScore -= 20;
-    if (cashRunwayDays < 15) healthScore -= 25;
+    const healthBreakdown = calculateFinancialHealthScore(
+      totalRevenue,
+      totalExpenses,
+      endingBalance,
+      personalExpenses
+    );
+
+    // Update bank account balance
+    await prisma.bankAccount.update({
+      where: { id: bankAccount.id },
+      data: { balance: endingBalance },
+    });
 
     await prisma.businessMetric.create({
       data: {
@@ -116,8 +125,8 @@ export async function POST(req: Request) {
         totalExpenses,
         netCashFlow,
         endingBalance,
-        cashRunwayDays,
-        healthScore,
+        cashRunwayDays: healthBreakdown.runwayDays,
+        healthScore: healthBreakdown.score,
       },
     });
 
@@ -129,8 +138,8 @@ export async function POST(req: Request) {
         totalRevenue,
         totalExpenses,
         netCashFlow,
-        cashRunwayDays,
-        healthScore,
+        cashRunwayDays: healthBreakdown.runwayDays,
+        healthScore: healthBreakdown.score,
       },
     });
   } catch (error) {
